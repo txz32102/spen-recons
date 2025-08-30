@@ -1,0 +1,42 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Train DualLR (CUDA 0, conda main)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/train.py",
+      "python": "/home/data1/musong/envs/main/bin/python",
+      "args": [
+        "--dataroot", "/home/data1/musong/workspace/2025/8/08-20/tr/data/IXI_sim",
+        "--cuda",
+        "--batch_size", "4",
+        "--n_epochs", "200",
+        "--decay_epoch", "100",
+        "--n_blocks", "2",
+        "--base_ch", "64",
+        "--lr", "2e-4",
+        "--l_phase", "1.0",
+        "--l_img", "1.0",
+        "--base_ch", "64",
+        "--use_gan",
+        "--l_gan_phi", "0.2",
+        "--l_gan_img", "0.5",
+        "--outdir", "temp"
+      ],
+      "console": "integratedTerminal",
+      "env": {
+        "CUDA_VISIBLE_DEVICES": "0"
+      }
+    },
+    {
+      "name": "Python: Debug Current File",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "python": "/home/data1/musong/envs/main/bin/python"
+    }
+  ]
+}
