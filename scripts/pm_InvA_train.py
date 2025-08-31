@@ -672,7 +672,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
 
         # --------- D_lr step ---------
         optimizer_D_lr.zero_grad()
-        pred_real_lr = netD_lr(_complex_to_2ch(real_lr))
+        pred_real_lr = netD_lr(real_lr)
         loss_D_lr_real = criterion_GAN(pred_real_lr, target_real)
 
         fake_lr_buf_out = fake_lr_buf.push_and_pop(pm_lr_2.detach())
