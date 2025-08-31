@@ -1,12 +1,12 @@
 #!/usr/bin/python3
 
 """ 
-cd /home/data1/musong/workspace/2025/8/08-20/tr
+cd /home/data1/musong/workspace/python/spen-recons
 source /home/data1/anaconda3/bin/activate
 conda activate /home/data1/musong/envs/main
-CUDA_VISIBLE_DEVICES=1 python3 /home/data1/musong/workspace/2025/8/08-20/tr/scripts/pm_InvA_train.py \
---dataroot /home/data1/musong/workspace/2025/8/08-20/tr/data/IXI_sim \
---log_dir /home/data1/musong/workspace/2025/8/08-20/tr/log/pm_InvA
+CUDA_VISIBLE_DEVICES=1 python3 /home/data1/musong/workspace/python/spen-recons/scripts/pm_InvA_train.py \
+--dataroot /home/data1/musong/workspace/python/spen-recons/data/IXI_sim \
+--log_dir /home/data1/musong/workspace/python/spen-recons/log/pm_InvA
 """
 
 
@@ -122,28 +122,12 @@ class Discriminator(nn.Module):
 
 
 def tensor2image(tensor):
-    """
-    Convert a torch tensor in [-1,1] to a grayscale numpy image.
-    Handles:
-      (1,H,W) -> (H,W)
-      (2,H,W) -> sqrt(real^2 + imag^2) -> (H,W)
-    """
     t = tensor.detach()
     arr = t[0].cpu().float().numpy()  # (C,H,W)
 
-    if arr.shape[0] == 1:
-        # Single channel -> grayscale
-        img = arr[0]
-        img = 127.5 * (img + 1.0)
-    elif arr.shape[0] == 2:
-        # Two channels -> magnitude
-        real, imag = arr[0], arr[1]
-        img = np.sqrt(((real+1)/2)**2 + ((imag+1)/2)**2)
-        img = img * 255.0
-    else:
-        raise ValueError(f"Unsupported channel count: {arr.shape[0]}")
+    img = arr[0]
+    img = 255 * img
 
-    
     return img.astype(np.uint8)
 
 class Logger:
@@ -288,31 +272,17 @@ def _first_data_array(mat_dict: dict) -> np.ndarray:
             return v
     raise KeyError("No data key found in .mat file (only __meta keys present).")
 
-
-def _load_and_normalize_mat(path: str) -> torch.Tensor:
-    # Load the .mat file and extract the data array
-    mat = loadmat(path)
-    arr = _first_data_array(mat)  # Assuming _first_data_array is defined elsewhere
-    
-    # Expand dimensions if needed
-    arr = np.expand_dims(arr, axis=0)
-
-    # Normalize data
-    if np.iscomplexobj(arr):  # Check if data is complex
-        arr = arr / np.abs(arr).max()  # Normalize based on absolute value
-        # Return as a complex64 tensor
-        return torch.tensor(arr, dtype=torch.complex64)
-    else:  # If the data is real
-        arr = arr / arr.max()  # Normalize based on real part max value
-        return torch.tensor(arr.astype(np.float32))
-
-def _load_hr(path: str) -> torch.Tensor:
-    """Load HR real image (HxW) -> 1xHxW tensor in [0,1]."""
+def _load_mat(path: str) -> torch.Tensor:
     mat = loadmat(path)
     arr = _first_data_array(mat)
     arr = np.expand_dims(arr, axis=0)
-    arr = arr / arr.max()
-    return torch.tensor(arr.astype(np.float32))
+    
+    if np.iscomplexobj(arr):              
+        return torch.tensor(arr, dtype=torch.complex64)
+
+    else:  
+        arr = arr.astype(np.float32)
+        return torch.tensor(arr, dtype=torch.float32)
 
 def _load_lr_mag(path: str) -> torch.Tensor:
     """
@@ -341,27 +311,182 @@ def _load_lr_mag(path: str) -> torch.Tensor:
 
     return torch.from_numpy(out.astype(np.float32))
 
-def _complex_to_1ch(x: torch.Tensor) -> torch.Tensor:
+def _load_and_normalize_mat(path: str) -> torch.Tensor:
+    mat = loadmat(path)
+    arr = _first_data_array(mat)
+
+    if np.iscomplexobj(arr):  
+        arr = arr / np.abs(arr).max()
+        
+        real = arr.real.astype(np.float32)
+        imag = arr.imag.astype(np.float32)
+        arr = np.stack([real, imag], axis=0)
+        
+        return torch.tensor(arr, dtype=torch.float32)
+
+    else:  
+        arr = np.expand_dims(arr, axis=0)
+        arr = arr / arr.max()
+        arr = arr.astype(np.float32)
+        return torch.tensor(arr, dtype=torch.float32)
+
+def _complex_to_mag(arr: torch.Tensor) -> torch.Tensor:
     """
-    Convert complex tensor (B,1,W,H) -> real tensor (B,1,W,H).
-    Uses magnitude, normalizes to [0,1], then rescales to [-1,1].
+    Convert a 2-channel (real, imag) tensor into a 1-channel magnitude tensor.
+    
+    Args:
+        arr (torch.Tensor): Tensor of shape (2, w, h) where
+                            arr[0] is real part, arr[1] is imaginary part.
+    
+    Returns:
+        torch.Tensor: Tensor of shape (1, w, h) containing magnitude values.
+    """
+    assert arr.ndim == 3 and arr.shape[0] == 2, \
+        f"Expected shape (2, w, h), got {arr.shape}"
+    
+    mag = torch.sqrt(arr[0]**2 + arr[1]**2)
+    return mag.unsqueeze(0)  # -> shape (1, w, h)
+
+def _complex_to_2ch(x: torch.Tensor) -> torch.Tensor:
+    """
+    Convert a complex tensor to 2-channel float tensor (real, imag).
+
+    Accepts shapes:
+      - (H, W)
+      - (N, H, W)
+      - (N, C, H, W)  (C may be 1; if C>1, channels are expanded to 2*C)
+
+    Returns:
+      - (2, H, W) for input (H, W)
+      - (N, 2, H, W) for input (N, H, W) or (N, 1, H, W)
+      - (N, 2*C, H, W) for input (N, C, H, W) with C>1
     """
     if not torch.is_complex(x):
-        raise ValueError("Input must be a complex tensor")
+        raise TypeError(f"Input must be complex, got dtype {x.dtype} and shape {tuple(x.shape)}")
 
-    if x.dim() != 4 or x.shape[1] != 1:
-        raise ValueError(f"Expected input of shape (B,1,W,H), got {tuple(x.shape)}")
+    xr = x.real.float()
+    xi = x.imag.float()
 
-    # Magnitude
-    mag = x.abs()  # (B,1,W,H), real
+    if x.ndim == 2:
+        # (H, W)  -> (2, H, W)
+        return torch.stack([xr, xi], dim=0).unsqueeze(1)
 
-    # Normalize to [0,1]
-    max_val = mag.amax(dim=(2,3), keepdim=True)
-    normed = mag  / max_val
+    if x.ndim == 3:
+        # (N, H, W) -> (N, 2, H, W)
+        return torch.stack([xr, xi], dim=1)
 
-    # Rescale to [-1,1]
-    out = normed * 2.0 - 1.0
+    if x.ndim == 4:
+        # (N, C, H, W)
+        C = x.shape[1]
+        if C == 1:
+            # (N, 1, H, W) -> (N, 2, H, W)
+            return torch.stack([xr.squeeze(1), xi.squeeze(1)], dim=1)
+        else:
+            # (N, C, H, W) -> (N, 2*C, H, W)
+            return torch.cat([xr, xi], dim=1)
+
+    raise ValueError(f"Unsupported shape {tuple(x.shape)}")
+
+def _load_hr(path: str) -> torch.Tensor:
+    """Load HR real image (HxW) -> 1xHxW tensor in [0,1]."""
+    mat = loadmat(path)
+    arr = _first_data_array(mat)
+    arr = np.expand_dims(arr, axis=0)
+    arr = arr / arr.max()
+    return torch.tensor(arr.astype(np.float32))
+
+def _complex_to_2ch_norm(x: torch.Tensor, eps: float = 1e-12) -> torch.Tensor:
+    """
+    Convert (B, 1, H, W) complex -> (B, 2, H, W) float (real, imag),
+    normalizing per sample so each sample's max magnitude is 1.
+
+    Args:
+        x: complex tensor of shape (B, 1, H, W)
+        eps: small value to avoid division by zero
+
+    Returns:
+        Float tensor of shape (B, 2, H, W): [real, imag]
+    """
+    if not torch.is_complex(x):
+        raise TypeError(f"Input must be complex, got {x.dtype} and shape {tuple(x.shape)}")
+    if x.ndim != 4:
+        raise ValueError(f"Expected 4D (B, C, H, W), got {x.ndim}D {tuple(x.shape)}")
+    B, C, H, W = x.shape
+    if C != 1:
+        raise ValueError(f"Expected C == 1, got C == {C}")
+
+    xr = x.real.float()  # (B,1,H,W)
+    xi = x.imag.float()  # (B,1,H,W)
+
+    mag = torch.sqrt(xr * xr + xi * xi)             # (B,1,H,W)
+    mag_max = mag.amax(dim=(1, 2, 3), keepdim=True) # (B,1,1,1)
+    mag_max = mag_max.clamp_min(eps)                # avoid divide-by-zero
+
+    xr = xr / mag_max
+    xi = xi / mag_max
+
+    out = torch.cat([xr, xi], dim=1)  # (B,2,H,W)
     return out
+
+def _2ch_to_abs(x: torch.Tensor) -> torch.Tensor:
+    """
+    Convert 2-channel (real, imag) float tensor into 1-channel magnitude tensor.
+
+    Args:
+        x (torch.Tensor): Tensor of shape
+                          - (2, H, W)
+                          - (N, 2, H, W)
+
+    Returns:
+        torch.Tensor: Tensor of shape
+                      - (1, H, W)   for input (2, H, W)
+                      - (N, 1, H, W) for input (N, 2, H, W)
+    """
+    if x.ndim == 3 and x.shape[0] == 2:
+        # (2, H, W) → (1, H, W)
+        mag = torch.sqrt(x[0]**2 + x[1]**2)
+        return mag.unsqueeze(0)
+
+    elif x.ndim == 4 and x.shape[1] == 2:
+        # (N, 2, H, W) → (N, 1, H, W)
+        mag = torch.sqrt(x[:,0]**2 + x[:,1]**2)
+        return mag.unsqueeze(1)
+
+    else:
+        raise ValueError(f"Unsupported shape {tuple(x.shape)}, expected (2,H,W) or (N,2,H,W)")
+    
+def _2ch_to_complex(x: torch.Tensor) -> torch.Tensor:
+    """
+    Convert 2-channel (real, imag) float tensor into a complex tensor.
+
+    Args:
+        x (torch.Tensor): Tensor of shape
+                          - (2, H, W)
+                          - (B, 2, H, W)
+
+    Returns:
+        torch.Tensor: Complex tensor of shape
+                      - (1, H, W)       for input (2, H, W)
+                      - (B, 1, H, W)    for input (B, 2, H, W)
+                      dtype=torch.complex64
+    """
+    if x.ndim == 3 and x.shape[0] == 2:
+        # (2, H, W) → (1, H, W)
+        real = x[0]
+        imag = x[1]
+        out = torch.complex(real, imag)
+        return out.unsqueeze(0)  # add channel dim → (1,H,W)
+
+    elif x.ndim == 4 and x.shape[1] == 2:
+        # (B, 2, H, W) → (B, 1, H, W)
+        real = x[:, 0]
+        imag = x[:, 1]
+        out = torch.complex(real, imag)
+        return out.unsqueeze(1)  # add channel dim → (B,1,H,W)
+
+    else:
+        raise ValueError(f"Unsupported shape {tuple(x.shape)}, expected (2,H,W) or (B,2,H,W)")
+
 
 class SpenDataset(Dataset):
     """
@@ -389,6 +514,7 @@ class SpenDataset(Dataset):
         # Collect .mat files
         self.file_lr = sorted(glob.glob(os.path.join(root, "lr", "*.mat")))
         self.file_hr = sorted(glob.glob(os.path.join(root, "hr", "*.mat")))
+        self.file_phase_map = sorted(glob.glob(os.path.join(root, "phase_map", "*.mat")))
 
         if len(self.file_lr) == 0 or len(self.file_hr) == 0:
             raise FileNotFoundError(
@@ -406,11 +532,13 @@ class SpenDataset(Dataset):
         else:
             j = index % len(self.file_hr)
         path_lr = self.file_lr[j]
+        path_phase_map = self.file_phase_map[j]
 
-        hr = _load_and_normalize_mat(path_hr)
+        hr = _load_hr(path_hr)
         lr = _load_and_normalize_mat(path_lr)
+        phase_map = _load_mat(path_phase_map)
     
-        return {"hr": hr, "lr": lr}
+        return {"hr": hr, "lr": lr, "phase_map": phase_map}
     
 class physical_model:
     def __init__(self, img_size=(96, 96), device='cuda'):
@@ -422,27 +550,27 @@ class physical_model:
         x = x.detach().to(torch.complex64)
         x = torch.matmul(self.AFinal * 1j, x)
         if phase_map is not None:
-            x[:, 1::2, :] *= torch.exp(1j * phase_map)
+            x[:, :, 1::2, :] *= torch.exp(1j * phase_map)
         return x
     
     def recons(self, x, phase_map=None):
         if phase_map is not None:
-            x[:, 1::2, :] *= torch.exp(-1j * phase_map)
-        return torch.matmul(self.InvA, x)    
+            x[:, :, 1::2, :] *= torch.exp(-1j * phase_map)
+        return torch.matmul(self.InvA, x)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--epoch', type=int, default=0, help='starting epoch')
-parser.add_argument('--n_epochs', type=int, default=500, help='number of epochs of training')
+parser.add_argument('--n_epochs', type=int, default=100, help='number of epochs of training')
 parser.add_argument('--batchSize', type=int, default=32, help='size of the batches')
-parser.add_argument('--dataroot', type=str, default='/home/data1/musong/workspace/2025/8/08-20/tr/data/IXI_sim', help='root directory of the dataset')
+parser.add_argument('--dataroot', type=str, default='/home/data1/musong/workspace/python/spen-recons/data/IXI_sim', help='root directory of the dataset')
 parser.add_argument('--lr', type=float, default=0.0002, help='initial learning rate')
-parser.add_argument('--decay_epoch', type=int, default=100, help='epoch to start linearly decaying the learning rate to 0')
+parser.add_argument('--decay_epoch', type=int, default=50, help='epoch to start linearly decaying the learning rate to 0')
 parser.add_argument('--size', type=int, default=96, help='size of the data crop (squared assumed)')
-parser.add_argument('--input_nc', type=int, default=1, help='number of channels of input data')
+parser.add_argument('--input_nc', type=int, default=2, help='number of channels of input data')
 parser.add_argument('--output_nc', type=int, default=1, help='number of channels of output data')
 parser.add_argument('--no-cuda', action='store_false', dest='cuda', help='disable GPU computation')
 parser.add_argument('--n_cpu', type=int, default=8, help='number of cpu threads to use during batch generation')
-parser.add_argument('--log_dir', type=str, default='/home/data1/musong/workspace/2025/8/08-20/tr/log/pm_InvA', help='directory to save logs and model checkpoints')
+parser.add_argument('--log_dir', type=str, default='/home/data1/musong/workspace/python/spen-recons/log/pm_InvA', help='directory to save logs and model checkpoints')
 parser.add_argument('--ckpt_save_freq', type=int, default=50, help='save checkpoint frequency (in epochs)')
 opt = parser.parse_args()
 print(opt)
@@ -452,8 +580,8 @@ if torch.cuda.is_available() and not opt.cuda:
 
 # --- nets ---
 netG = Generator(opt.input_nc, opt.output_nc)
-netD_hr = Discriminator(opt.output_nc)   # disc over HR (1ch)
-netD_lr = Discriminator(opt.output_nc)   # disc over LR (1ch mag)
+netD_hr = Discriminator(opt.output_nc)
+netD_lr = Discriminator(opt.input_nc)
 
 PM = physical_model()  # HR->[complex LR]; we will convert to 1ch
 
@@ -498,31 +626,32 @@ logger = Logger(opt.n_epochs, len(dataloader), f'{opt.log_dir}/train')
 # --- training ---
 for epoch in range(opt.epoch, opt.n_epochs):
     for i, batch in enumerate(dataloader):
-        real_hr_11 = batch['hr'].to(device)         # HR in [-1,1], 1ch
-        real_lr_11 = batch['lr'].to(device)         # LR may be 1ch or 2ch
+        real_hr = batch['hr'].to(device)         # HR in [0,1], 1ch
+        real_lr = batch['lr'].to(device)         # LR(complex data) its abs in [0,1], 2ch
+        phase_map = batch['phase_map'].to(device) # phase map (radians), 1ch
 
         # --------- G step ---------
         optimizer_G.zero_grad()
 
         # path A: HR -> PM -> LR1 -> G -> HR_hat ; adversarial on HR
-        pm_lr_1 = PM((real_hr_11+1)/2)             # 1ch [-1,1]
-        pm_lr_1 = _complex_to_1ch(pm_lr_1)
-        fake_hr = netG(pm_lr_1)                     # 1ch [-1,1]
+        pm_lr_1 = PM(real_hr,phase_map)
+        pm_lr_1 = _complex_to_2ch_norm(PM.recons(pm_lr_1, phase_map))
+        fake_hr = netG(pm_lr_1)
         pred_fake_hr = netD_hr(fake_hr)
         loss_GAN_hr = criterion_GAN(pred_fake_hr, target_real)
 
         # path B: LR (data) -> G -> HR_tilde -> PM -> LR_tilde ; adversarial on LR
-        recovered_hr = netG(real_lr_11)             # 1ch [-1,1]
-        pm_lr_2 = PM((recovered_hr+1)/2)        # 1ch [-1,1]
-        pm_lr_2 = _complex_to_1ch(pm_lr_2)
+        temp_lr = _complex_to_2ch_norm(PM.recons(_2ch_to_complex(real_lr), phase_map))
+        recovered_hr = netG(temp_lr)
+        pm_lr_2 = PM(recovered_hr, phase_map)
+        pm_lr_2 = _complex_to_2ch_norm(PM.recons(pm_lr_2, phase_map))
         pred_fake_lr = netD_lr(pm_lr_2)
         loss_GAN_lr = criterion_GAN(pred_fake_lr, target_real)
 
         # cycle losses (both in matching spaces)
-        # LR->HR->PM should match LR (both 1ch [-1,1])
-        loss_cycle_lrhrlr  = criterion_cycle(pm_lr_2, real_lr_11) * 5.0
+        loss_cycle_lrhrlr  = criterion_cycle(pm_lr_2, real_lr) * 5.0
         # HR->PM->G should reconstruct HR
-        loss_cycle_hrlrhr  = criterion_cycle(fake_hr, real_hr_11) * 5.0
+        loss_cycle_hrlrhr  = criterion_cycle(fake_hr, real_hr) * 5.0
 
         loss_G = loss_GAN_hr + loss_GAN_lr + loss_cycle_lrhrlr + loss_cycle_hrlrhr
         loss_G.backward()
@@ -530,7 +659,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
 
         # --------- D_hr step ---------
         optimizer_D_hr.zero_grad()
-        pred_real_hr = netD_hr(real_hr_11)
+        pred_real_hr = netD_hr(real_hr)
         loss_D_hr_real = criterion_GAN(pred_real_hr, target_real)
 
         fake_hr_buf_out = fake_hr_buf.push_and_pop(fake_hr.detach())
@@ -543,7 +672,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
 
         # --------- D_lr step ---------
         optimizer_D_lr.zero_grad()
-        pred_real_lr = netD_lr(real_lr_11)
+        pred_real_lr = netD_lr(_complex_to_2ch(real_lr))
         loss_D_lr_real = criterion_GAN(pred_real_lr, target_real)
 
         fake_lr_buf_out = fake_lr_buf.push_and_pop(pm_lr_2.detach())
@@ -567,11 +696,11 @@ for epoch in range(opt.epoch, opt.n_epochs):
                     'loss_D_lr': loss_D_lr
                 },
                 images={
-                    'real_hr': real_hr_11,
-                    'real_lr': real_lr_11,
+                    'real_hr': real_hr,
+                    'real_lr': _2ch_to_abs(real_lr),
                     'fake_hr': fake_hr,
-                    'pm_lr_from_recHR': pm_lr_2,
-                    'pm_lr_from_realHR': pm_lr_1,
+                    'pm_lr_from_recHR': _2ch_to_abs(pm_lr_2),
+                    'pm_lr_from_realHR': _2ch_to_abs(pm_lr_1),
                     'recovered_hr': recovered_hr
                 }
             )
