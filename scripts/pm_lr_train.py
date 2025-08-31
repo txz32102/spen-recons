@@ -1,12 +1,12 @@
 #!/usr/bin/python3
 
 """ 
-cd /home/data1/musong/workspace/2025/8/08-20/tr
+cd /home/data1/musong/workspace/python/spen-recons
 source /home/data1/anaconda3/bin/activate
 conda activate /home/data1/musong/envs/main
-CUDA_VISIBLE_DEVICES=1 python3 /home/data1/musong/workspace/2025/8/08-20/tr/scripts/pm_lr_train.py \
---dataroot /home/data1/musong/workspace/2025/8/08-20/tr/data/IXI_sim \
---log_dir /home/data1/musong/workspace/2025/8/08-20/tr/log/pm_lr
+CUDA_VISIBLE_DEVICES=1 python3 /home/data1/musong/workspace/python/spen-recons/scripts/pm_lr_train.py \
+--dataroot /home/data1/musong/workspace/python/spen-recons/data/IXI_sim \
+--log_dir /home/data1/musong/workspace/python/spen-recons/log/pm_lr
 """
 
 
@@ -416,7 +416,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--epoch', type=int, default=0, help='starting epoch')
 parser.add_argument('--n_epochs', type=int, default=500, help='number of epochs of training')
 parser.add_argument('--batchSize', type=int, default=32, help='size of the batches')
-parser.add_argument('--dataroot', type=str, default='/home/data1/musong/workspace/2025/8/08-20/tr/data/IXI_sim', help='root directory of the dataset')
+parser.add_argument('--dataroot', type=str, default='/home/data1/musong/workspace/python/spen-recons/data/IXI_sim', help='root directory of the dataset')
 parser.add_argument('--lr', type=float, default=0.0002, help='initial learning rate')
 parser.add_argument('--decay_epoch', type=int, default=100, help='epoch to start linearly decaying the learning rate to 0')
 parser.add_argument('--size', type=int, default=96, help='size of the data crop (squared assumed)')
@@ -424,7 +424,7 @@ parser.add_argument('--input_nc', type=int, default=1, help='number of channels 
 parser.add_argument('--output_nc', type=int, default=1, help='number of channels of output data')
 parser.add_argument('--no-cuda', action='store_false', dest='cuda', help='disable GPU computation')
 parser.add_argument('--n_cpu', type=int, default=8, help='number of cpu threads to use during batch generation')
-parser.add_argument('--log_dir', type=str, default='/home/data1/musong/workspace/2025/8/08-20/tr/log/pm_lr_v1', help='directory to save logs and model checkpoints')
+parser.add_argument('--log_dir', type=str, default='/home/data1/musong/workspace/python/spen-recons/log/pm_lr', help='directory to save logs and model checkpoints')
 parser.add_argument('--ckpt_save_freq', type=int, default=50, help='save checkpoint frequency (in epochs)')
 opt = parser.parse_args()
 print(opt)
