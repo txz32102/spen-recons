@@ -39,3 +39,8 @@ CUDA_VISIBLE_DEVICES=0 python test.py \
   --outdir test/test_result \
   --cuda
 ```
+
+## nxz
+/home/user/NewSpace/nxz/dwi/CycleGAN/MR-motion-bootstrap-subsampling/MR_motion_bootstrap_subsampling-main/Results_2/Rat_0116_3/ckpt_dir/model.ckpt-520
+
+/home/user/data4/env/anaconda3/envs/rl_3.7 has tensorflow!

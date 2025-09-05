@@ -3,11 +3,10 @@
 cd /home/data1/musong/workspace/python/spen-recons
 source /home/data1/anaconda3/bin/activate
 conda activate /home/data1/musong/envs/main
-CUDA_VISIBLE_DEVICES=7 python3 /home/data1/musong/workspace/python/spen-recons/scripts/pm_lr_test.py \
+CUDA_VISIBLE_DEVICES=7 python3 /home/data1/musong/workspace/python/spen-recons/scripts/pm_InvA_test.py \
 --dataroot /home/data1/musong/workspace/python/spen-recons/test_data \
---cuda \
---log_dir /home/data1/musong/workspace/python/spen-recons/log/pm_lr/test \
---generator_lr2hr /home/data1/musong/workspace/python/spen-recons/log/pm_lr/weights/netG_lr2hr.pth
+--log_dir /home/data1/musong/workspace/python/spen-recons/log/pm_InvA/test \
+--generator_lr2hr /home/data1/musong/workspace/python/spen-recons/log/pm_InvA/weights/netG_lr2hr.pth
 """
 import argparse
 import sys
@@ -163,6 +162,40 @@ def _load_lr_mag(path: str) -> torch.Tensor:
 
     return torch.from_numpy(out.astype(np.float32))
 
+def _load_mat(path: str) -> torch.Tensor:
+    mat = loadmat(path)
+    arr = _first_data_array(mat)
+    arr = np.expand_dims(arr, axis=0)
+    
+    if np.iscomplexobj(arr):              
+        return torch.tensor(arr, dtype=torch.complex64)
+
+    else:  
+        arr = arr.astype(np.float32)
+        return torch.tensor(arr, dtype=torch.float32)
+    
+def _complex_to_1ch(x: torch.Tensor) -> torch.Tensor:
+    """
+    Convert complex tensor (B,1,W,H) -> real tensor (B,1,W,H).
+    Uses magnitude, normalizes to [0,1], then rescales to [-1,1].
+    """
+    if not torch.is_complex(x):
+        raise ValueError("Input must be a complex tensor")
+
+    if x.dim() != 4 or x.shape[1] != 1:
+        raise ValueError(f"Expected input of shape (B,1,W,H), got {tuple(x.shape)}")
+
+    # Magnitude
+    mag = x.abs()  # (B,1,W,H), real
+
+    # Normalize to [0,1]
+    max_val = mag.amax(dim=(2,3), keepdim=True)
+    normed = mag  / max_val
+
+    # Rescale to [-1,1]
+    out = normed * 2.0 - 1.0
+    return out
+
 def mat_to_img01(path: str) -> np.ndarray:
     """Load .mat, pick first non-meta key, magnitude if complex, min-max to [0,1], return HxW float32."""
     md = loadmat(path)
@@ -278,6 +311,20 @@ class SpenDataset(Dataset):
         # Collect .mat files
         self.file_lr = sorted(glob.glob(os.path.join(root, "lr", "*.mat")))
         self.file_hr = sorted(glob.glob(os.path.join(root, "hr", "*.mat")))
+        self.file_phase_map = sorted(glob.glob(os.path.join(root, "phase_map", "*.mat")))
+
+        # Get basenames
+        lr_names = {os.path.basename(f) for f in self.file_lr}
+        hr_names = {os.path.basename(f) for f in self.file_hr}
+        phase_names = {os.path.basename(f) for f in self.file_phase_map}
+
+        # Only keep files that are in all three
+        common = lr_names & hr_names & phase_names
+
+        # Filter the lists
+        self.file_lr = [f for f in self.file_lr if os.path.basename(f) in common]
+        self.file_hr = [f for f in self.file_hr if os.path.basename(f) in common]
+        self.file_phase_map = [f for f in self.file_phase_map if os.path.basename(f) in common]
 
         if len(self.file_lr) == 0 or len(self.file_hr) == 0:
             raise FileNotFoundError(
@@ -286,15 +333,19 @@ class SpenDataset(Dataset):
             )
 
     def __len__(self):
-        return max(len(self.file_lr), len(self.file_hr))
+        return min(len(self.file_lr), len(self.file_hr), len(self.file_phase_map))
 
     def __getitem__(self, index: int):
         path_lr = self.file_lr[index]
         lr_id = os.path.splitext(os.path.basename(path_lr))[0]
+        path_phase_map = self.file_phase_map[index]
 
         lr = _load_lr_mag(path_lr) * 2 - 1
+        lr_complex = _load_mat(path_lr)
+        
+        phase_map = _load_mat(path_phase_map)
     
-        return {"lr": lr, "lr_id": lr_id, "lr_path": path_lr}
+        return {"lr": lr, "lr_id": lr_id, "lr_path": path_lr, "lr_complex": lr_complex, "phase_map": phase_map}
     
 class physical_model:
     def __init__(self, img_size=(96, 96), device='cuda'):
@@ -306,25 +357,25 @@ class physical_model:
         x = x.detach().to(torch.complex64)
         x = torch.matmul(self.AFinal * 1j, x)
         if phase_map is not None:
-            x[:, 1::2, :] *= torch.exp(1j * phase_map)
+            x[:, :, 1::2, :] *= torch.exp(1j * phase_map)
         return x
     
     def recons(self, x, phase_map=None):
         if phase_map is not None:
-            x[:, 1::2, :] *= torch.exp(-1j * phase_map)
-        return torch.matmul(self.InvA, x)    
+            x[:, :, 1::2, :] *= torch.exp(-1j * phase_map)
+        return torch.matmul(self.InvA, x)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--batchSize', type=int, default=1, help='size of the batches')
-parser.add_argument('--dataroot', type=str, default='datasets/horse2zebra/', help='root directory of the dataset')
+parser.add_argument('--dataroot', type=str, default='/home/data1/musong/workspace/python/spen-recons/test_data', help='root directory of the dataset')
 parser.add_argument('--input_nc', type=int, default=1, help='number of channels of input data')
 parser.add_argument('--output_nc', type=int, default=1, help='number of channels of output data')
 parser.add_argument('--size', type=int, default=96, help='size of the data (squared assumed)')
 parser.add_argument("--which", choices=["hr","lr"], default="hr", help="Evaluate recon set.")
-parser.add_argument('--cuda', action='store_true', help='use GPU computation')
+parser.add_argument('--no-cuda', action='store_false', dest='cuda', help='disable GPU computation')
 parser.add_argument('--n_cpu', type=int, default=8, help='number of cpu threads to use during batch generation')
-parser.add_argument('--generator_lr2hr', type=str, default='output/netG_lr2hr.pth', help='B2A generator checkpoint file')
-parser.add_argument('--log_dir', type=str, default='logs/', help='directory to save logs and model checkpoints')
+parser.add_argument('--generator_lr2hr', type=str, default='/home/data1/musong/workspace/python/spen-recons/log/pm_InvA/weights/netG_lr2hr.pth', help='B2A generator checkpoint file')
+parser.add_argument('--log_dir', type=str, default='/home/data1/musong/workspace/python/spen-recons/log/pm_InvA/test', help='directory to save logs and model checkpoints')
 opt = parser.parse_args()
 print(opt)
 
@@ -348,11 +399,16 @@ netG.eval()
 dataloader = DataLoader(SpenDataset(opt.dataroot),
                         batch_size=opt.batchSize,
                         num_workers=opt.n_cpu)
+PM = physical_model() 
 
 for i, batch in enumerate(dataloader):
-    real_lr_11 = batch['lr'].to(device)   
+    real_lr_complex = batch['lr_complex'].to(device) 
+    phase_map = batch['phase_map'].to(device) 
+    pm_lr = PM.recons(real_lr_complex, phase_map)
+    pm_lr = _complex_to_1ch(pm_lr)
 
-    recovered_hr = netG(real_lr_11)
+    recovered_hr = netG(pm_lr)
+    # recovered_hr = pm_lr
 
     os.makedirs(f'{opt.log_dir}/hr', exist_ok=True)
 

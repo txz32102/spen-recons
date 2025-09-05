@@ -122,14 +122,29 @@ class Discriminator(nn.Module):
 
 
 def tensor2image(tensor):
+    """
+    Convert a torch tensor in [-1,1] to a grayscale numpy image.
+    Handles:
+      (1,H,W) -> (H,W)
+      (2,H,W) -> sqrt(real^2 + imag^2) -> (H,W)
+    """
     t = tensor.detach()
     arr = t[0].cpu().float().numpy()  # (C,H,W)
 
-    img = arr[0]
-    img = 255 * img
+    if arr.shape[0] == 1:
+        # Single channel -> grayscale
+        img = arr[0]
+        img = 127.5 * (img + 1.0)
+    elif arr.shape[0] == 2:
+        # Two channels -> magnitude
+        real, imag = arr[0], arr[1]
+        img = np.sqrt(((real+1)/2)**2 + ((imag+1)/2)**2)
+        img = img * 255.0
+    else:
+        raise ValueError(f"Unsupported channel count: {arr.shape[0]}")
 
     return img.astype(np.uint8)
-
+    
 class Logger:
     def __init__(self, n_epochs, batches_epoch, log_dir='logs', running_avg=False):
         self.n_epochs = n_epochs
@@ -487,6 +502,27 @@ def _2ch_to_complex(x: torch.Tensor) -> torch.Tensor:
     else:
         raise ValueError(f"Unsupported shape {tuple(x.shape)}, expected (2,H,W) or (B,2,H,W)")
 
+def _complex_to_1ch(x: torch.Tensor) -> torch.Tensor:
+    """
+    Convert complex tensor (B,1,W,H) -> real tensor (B,1,W,H).
+    Uses magnitude, normalizes to [0,1], then rescales to [-1,1].
+    """
+    if not torch.is_complex(x):
+        raise ValueError("Input must be a complex tensor")
+
+    if x.dim() != 4 or x.shape[1] != 1:
+        raise ValueError(f"Expected input of shape (B,1,W,H), got {tuple(x.shape)}")
+
+    # Magnitude
+    mag = x.abs()  # (B,1,W,H), real
+
+    # Normalize to [0,1]
+    max_val = mag.amax(dim=(2,3), keepdim=True)
+    normed = mag  / max_val
+
+    # Rescale to [-1,1]
+    out = normed * 2.0 - 1.0
+    return out
 
 class SpenDataset(Dataset):
     """
@@ -534,11 +570,12 @@ class SpenDataset(Dataset):
         path_lr = self.file_lr[j]
         path_phase_map = self.file_phase_map[j]
 
-        hr = _load_hr(path_hr)
-        lr = _load_and_normalize_mat(path_lr)
+        hr = _load_hr(path_hr) * 2 - 1
+        lr = _load_lr_mag(path_lr) * 2 - 1
+        lr_complex = _load_mat(path_lr)
         phase_map = _load_mat(path_phase_map)
     
-        return {"hr": hr, "lr": lr, "phase_map": phase_map}
+        return {"hr": hr, "lr": lr, "phase_map": phase_map, "lr_complex": lr_complex}
     
 class physical_model:
     def __init__(self, img_size=(96, 96), device='cuda'):
@@ -560,13 +597,13 @@ class physical_model:
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--epoch', type=int, default=0, help='starting epoch')
-parser.add_argument('--n_epochs', type=int, default=100, help='number of epochs of training')
+parser.add_argument('--n_epochs', type=int, default=500, help='number of epochs of training')
 parser.add_argument('--batchSize', type=int, default=32, help='size of the batches')
 parser.add_argument('--dataroot', type=str, default='/home/data1/musong/workspace/python/spen-recons/data/IXI_sim', help='root directory of the dataset')
 parser.add_argument('--lr', type=float, default=0.0002, help='initial learning rate')
 parser.add_argument('--decay_epoch', type=int, default=50, help='epoch to start linearly decaying the learning rate to 0')
 parser.add_argument('--size', type=int, default=96, help='size of the data crop (squared assumed)')
-parser.add_argument('--input_nc', type=int, default=2, help='number of channels of input data')
+parser.add_argument('--input_nc', type=int, default=1, help='number of channels of input data')
 parser.add_argument('--output_nc', type=int, default=1, help='number of channels of output data')
 parser.add_argument('--no-cuda', action='store_false', dest='cuda', help='disable GPU computation')
 parser.add_argument('--n_cpu', type=int, default=8, help='number of cpu threads to use during batch generation')
@@ -626,25 +663,27 @@ logger = Logger(opt.n_epochs, len(dataloader), f'{opt.log_dir}/train')
 # --- training ---
 for epoch in range(opt.epoch, opt.n_epochs):
     for i, batch in enumerate(dataloader):
-        real_hr = batch['hr'].to(device)         # HR in [0,1], 1ch
-        real_lr = batch['lr'].to(device)         # LR(complex data) its abs in [0,1], 2ch
-        phase_map = batch['phase_map'].to(device) # phase map (radians), 1ch
+        real_hr = batch['hr'].to(device)
+        real_lr = batch['lr'].to(device)
+        real_lr_complex = batch['lr_complex'].to(device)
+        phase_map = batch['phase_map'].to(device)
 
         # --------- G step ---------
         optimizer_G.zero_grad()
 
         # path A: HR -> PM -> LR1 -> G -> HR_hat ; adversarial on HR
-        pm_lr_1 = PM(real_hr,phase_map)
-        pm_lr_1 = _complex_to_2ch_norm(PM.recons(pm_lr_1, phase_map))
+        pm_lr_1 = PM((real_hr+1)/2, phase_map)
+        pm_lr_1 = PM.recons(pm_lr_1, phase_map)
+        pm_lr_1 = _complex_to_1ch(pm_lr_1)
         fake_hr = netG(pm_lr_1)
         pred_fake_hr = netD_hr(fake_hr)
         loss_GAN_hr = criterion_GAN(pred_fake_hr, target_real)
 
         # path B: LR (data) -> G -> HR_tilde -> PM -> LR_tilde ; adversarial on LR
-        temp_lr = _complex_to_2ch_norm(PM.recons(_2ch_to_complex(real_lr), phase_map))
-        recovered_hr = netG(temp_lr)
-        pm_lr_2 = PM(recovered_hr, phase_map)
-        pm_lr_2 = _complex_to_2ch_norm(PM.recons(pm_lr_2, phase_map))
+        pm_lr_2 = PM.recons(real_lr_complex, phase_map)
+        pm_lr_2 = _complex_to_1ch(pm_lr_2)
+        recovered_hr = netG(pm_lr_2) 
+        
         pred_fake_lr = netD_lr(pm_lr_2)
         loss_GAN_lr = criterion_GAN(pred_fake_lr, target_real)
 
@@ -697,10 +736,10 @@ for epoch in range(opt.epoch, opt.n_epochs):
                 },
                 images={
                     'real_hr': real_hr,
-                    'real_lr': _2ch_to_abs(real_lr),
+                    'real_lr': real_lr,
                     'fake_hr': fake_hr,
-                    'pm_lr_from_recHR': _2ch_to_abs(pm_lr_2),
-                    'pm_lr_from_realHR': _2ch_to_abs(pm_lr_1),
+                    'pm_lr_from_recHR': pm_lr_2,
+                    'pm_lr_from_realHR': pm_lr_1,
                     'recovered_hr': recovered_hr
                 }
             )
