@@ -31,6 +31,16 @@ CUDA_VISIBLE_DEVICES=1 python3 /home/data1/musong/workspace/python/spen-recons/s
 """
 
 
+"""
+# train on mixed_2000, which is the mixed dataset of IXI data and rat data
+cd /home/data1/musong/workspace/python/spen-recons
+source /home/data1/anaconda3/bin/activate
+conda activate /home/data1/musong/envs/main
+CUDA_VISIBLE_DEVICES=1 python3 /home/data1/musong/workspace/python/spen-recons/scripts/pm_InvA_train.py \
+--dataroot /home/data1/musong/workspace/python/spen-recons/data/mixed_2000 \
+--log_dir /home/data1/musong/workspace/python/spen-recons/log/pm_InvA
+"""
+
 import argparse
 import os
 import sys

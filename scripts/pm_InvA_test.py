@@ -4,7 +4,7 @@ cd /home/data1/musong/workspace/python/spen-recons
 source /home/data1/anaconda3/bin/activate
 conda activate /home/data1/musong/envs/main
 CUDA_VISIBLE_DEVICES=7 python3 /home/data1/musong/workspace/python/spen-recons/scripts/pm_InvA_test.py \
---dataroot /home/data1/musong/workspace/python/spen-recons/test_data \
+--dataroot /home/data1/musong/workspace/python/spen-recons/test_data_2025_9_7 \
 --log_dir /home/data1/musong/workspace/python/spen-recons/log/pm_InvA/test \
 --generator_lr2hr /home/data1/musong/workspace/python/spen-recons/log/pm_InvA/weights/netG_lr2hr.pth
 """
@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import csv
 import glob
+import shutil
 
 from scipy.io import loadmat
 import numpy as np
@@ -406,8 +407,14 @@ for i, batch in enumerate(dataloader):
     recovered_hr = netG(pm_lr)
     # recovered_hr = pm_lr
 
-    os.makedirs(f'{opt.log_dir}/hr', exist_ok=True)
-    os.makedirs(f'{opt.log_dir}/pm_lr', exist_ok=True)
+    # Delete existing dirs if they exist
+    for sub in ["hr", "pm_lr"]:
+        dir_path = os.path.join(opt.log_dir, sub)
+        if os.path.exists(dir_path):
+            shutil.rmtree(dir_path)  # remove the whole folder
+
+        # Recreate
+        os.makedirs(dir_path, exist_ok=True)
     
     # Save each sample in the batch
     for b in range(len(batch['lr_id'])):
