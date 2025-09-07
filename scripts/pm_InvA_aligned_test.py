@@ -3,10 +3,10 @@
 cd /home/data1/musong/workspace/python/spen-recons
 source /home/data1/anaconda3/bin/activate
 conda activate /home/data1/musong/envs/main
-CUDA_VISIBLE_DEVICES=7 python3 /home/data1/musong/workspace/python/spen-recons/scripts/pm_InvA_test.py \
+CUDA_VISIBLE_DEVICES=7 python3 /home/data1/musong/workspace/python/spen-recons/scripts/pm_InvA_aligned_test.py \
 --dataroot /home/data1/musong/workspace/python/spen-recons/test_data \
---log_dir /home/data1/musong/workspace/python/spen-recons/log/pm_InvA/test \
---generator_lr2hr /home/data1/musong/workspace/python/spen-recons/log/pm_InvA/weights/netG_lr2hr.pth
+--log_dir /home/data1/musong/workspace/python/spen-recons/log/pm_InvA_aligned/test \
+--generator_lr2hr /home/data1/musong/workspace/python/spen-recons/log/pm_InvA_aligned/weights/netG_lr2hr.pth
 """
 import argparse
 import sys
@@ -370,8 +370,8 @@ parser.add_argument('--size', type=int, default=96, help='size of the data (squa
 parser.add_argument("--which", choices=["hr","lr"], default="hr", help="Evaluate recon set.")
 parser.add_argument('--no-cuda', action='store_false', dest='cuda', help='disable GPU computation')
 parser.add_argument('--n_cpu', type=int, default=8, help='number of cpu threads to use during batch generation')
-parser.add_argument('--generator_lr2hr', type=str, default='/home/data1/musong/workspace/python/spen-recons/log/pm_InvA/weights/netG_lr2hr.pth', help='B2A generator checkpoint file')
-parser.add_argument('--log_dir', type=str, default='/home/data1/musong/workspace/python/spen-recons/log/pm_InvA/test', help='directory to save logs and model checkpoints')
+parser.add_argument('--generator_lr2hr', type=str, default='/home/data1/musong/workspace/python/spen-recons/log/pm_InvA_aligned/weights/netG_lr2hr.pth', help='B2A generator checkpoint file')
+parser.add_argument('--log_dir', type=str, default='/home/data1/musong/workspace/python/spen-recons/log/pm_InvA_aligned/test', help='directory to save logs and model checkpoints')
 opt = parser.parse_args()
 print(opt)
 

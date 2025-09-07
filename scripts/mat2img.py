@@ -65,11 +65,11 @@ def convert_tree(src_root: Path, dst_root: Path, ext=".png") -> None:
 def main():
     parser = argparse.ArgumentParser(description="Export .mat images to PNG while preserving folder structure.")
     parser.add_argument("--src_root", type=Path,
-        default="/home/data1/musong/workspace/2025/8/08-20/tr/test_data",
+        default="/home/data1/musong/workspace/python/spen-recons/temp/mat/hr",
         help="Source root containing hr/lr/phase_map subfolders.")
 
     parser.add_argument("--out_root", type=Path,
-        default="/home/data1/musong/workspace/2025/8/08-20/tr/temp",
+        default="/home/data1/musong/workspace/python/spen-recons/temp/img/hr",
         help="Destination root (e.g., a log folder).")
     parser.add_argument("--ext", type=str, default=".png", help="Image extension (.png, .jpg). Default: .png")
     args = parser.parse_args()

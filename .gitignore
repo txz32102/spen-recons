@@ -1,5 +1,7 @@
 test_data
 __pycache__
 log
-data
+data/IXI_enriched
+data/IXI_enriched_2000
+data/IXI_sim
 temp

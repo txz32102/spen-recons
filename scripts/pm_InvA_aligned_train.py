@@ -1,33 +1,13 @@
 #!/usr/bin/python3
 
 """
-# train on IXI_sim
-cd /home/data1/musong/workspace/python/spen-recons
-source /home/data1/anaconda3/bin/activate
-conda activate /home/data1/musong/envs/main
-CUDA_VISIBLE_DEVICES=1 python3 /home/data1/musong/workspace/python/spen-recons/scripts/pm_InvA_train.py \
---dataroot /home/data1/musong/workspace/python/spen-recons/data/IXI_sim \
---log_dir /home/data1/musong/workspace/python/spen-recons/log/pm_InvA
-"""
-
-"""
-# train on IXI_enriched
-cd /home/data1/musong/workspace/python/spen-recons
-source /home/data1/anaconda3/bin/activate
-conda activate /home/data1/musong/envs/main
-CUDA_VISIBLE_DEVICES=1 python3 /home/data1/musong/workspace/python/spen-recons/scripts/pm_InvA_train.py \
---dataroot /home/data1/musong/workspace/python/spen-recons/data/IXI_enriched \
---log_dir /home/data1/musong/workspace/python/spen-recons/log/pm_InvA
-"""
-
-"""
 # train on IXI_enriched_2000
 cd /home/data1/musong/workspace/python/spen-recons
 source /home/data1/anaconda3/bin/activate
 conda activate /home/data1/musong/envs/main
-CUDA_VISIBLE_DEVICES=1 python3 /home/data1/musong/workspace/python/spen-recons/scripts/pm_InvA_train.py \
+CUDA_VISIBLE_DEVICES=2 python3 /home/data1/musong/workspace/python/spen-recons/scripts/pm_InvA_aligned_train.py \
 --dataroot /home/data1/musong/workspace/python/spen-recons/data/IXI_enriched_2000 \
---log_dir /home/data1/musong/workspace/python/spen-recons/log/pm_InvA
+--log_dir /home/data1/musong/workspace/python/spen-recons/log/pm_InvA_aligned 
 """
 
 
@@ -580,7 +560,7 @@ class SpenDataset(Dataset):
             )
 
     def __len__(self):
-        return max(len(self.file_lr), len(self.file_hr))
+        return min(len(self.file_lr), len(self.file_hr))
 
     def __getitem__(self, index: int):
         path_hr = self.file_hr[index % len(self.file_hr)]
@@ -673,7 +653,7 @@ target_fake = torch.zeros((opt.batchSize, 1), dtype=torch.float32, device=device
 fake_hr_buf = ReplayBuffer()
 fake_lr_buf = ReplayBuffer()
 
-dataloader = DataLoader(SpenDataset(opt.dataroot, unaligned=True),
+dataloader = DataLoader(SpenDataset(opt.dataroot, unaligned=False),
                         batch_size=opt.batchSize, shuffle=True,
                         num_workers=opt.n_cpu, drop_last=True)
 
