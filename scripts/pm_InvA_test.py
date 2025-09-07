@@ -398,6 +398,15 @@ dataloader = DataLoader(SpenDataset(opt.dataroot),
                         num_workers=opt.n_cpu)
 PM = physical_model() 
 
+# Delete existing dirs if they exist
+for sub in ["hr", "pm_lr"]:
+    dir_path = os.path.join(opt.log_dir, sub)
+    if os.path.exists(dir_path):
+        shutil.rmtree(dir_path)  # remove the whole folder
+
+    # Recreate
+    os.makedirs(dir_path, exist_ok=True)
+
 for i, batch in enumerate(dataloader):
     real_lr_complex = batch['lr_complex'].to(device) 
     phase_map = batch['phase_map'].to(device) 
@@ -406,15 +415,6 @@ for i, batch in enumerate(dataloader):
 
     recovered_hr = netG(pm_lr)
     # recovered_hr = pm_lr
-
-    # Delete existing dirs if they exist
-    for sub in ["hr", "pm_lr"]:
-        dir_path = os.path.join(opt.log_dir, sub)
-        if os.path.exists(dir_path):
-            shutil.rmtree(dir_path)  # remove the whole folder
-
-        # Recreate
-        os.makedirs(dir_path, exist_ok=True)
     
     # Save each sample in the batch
     for b in range(len(batch['lr_id'])):
